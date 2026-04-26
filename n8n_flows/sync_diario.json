@@ -1,0 +1,104 @@
+{
+  "name": "Chillanejo — Sync Diario Relbase → Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Cron — 03:00 AM diario",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /app/chillanejo && python -m conectores.relbase.sync_incremental 2>&1"
+      },
+      "id": "run-sync",
+      "name": "Ejecutar sync incremental",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.exitCode }}",
+              "operation": "notEqual",
+              "value2": "0"
+            }
+          ]
+        }
+      },
+      "id": "check-error",
+      "name": "¿Hubo error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "to": "dannidro@gmail.com",
+        "subject": "⚠️ Error en sync Chillanejo — {{ $now.format('DD/MM/YYYY') }}",
+        "emailType": "text",
+        "message": "El sync diario de Chillanejo falló.\n\nSalida del proceso:\n{{ $json.stdout }}\n\nError:\n{{ $json.stderr }}\n\nRevisar logs en el servidor."
+      },
+      "id": "notify-error",
+      "name": "Notificar error por email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [960, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/sync_log",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "verify-sync",
+      "name": "Verificar sync_log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [960, 400]
+    }
+  ],
+  "connections": {
+    "Cron — 03:00 AM diario": {
+      "main": [[{ "node": "Ejecutar sync incremental", "type": "main", "index": 0 }]]
+    },
+    "Ejecutar sync incremental": {
+      "main": [[{ "node": "¿Hubo error?", "type": "main", "index": 0 }]]
+    },
+    "¿Hubo error?": {
+      "main": [
+        [{ "node": "Notificar error por email", "type": "main", "index": 0 }],
+        [{ "node": "Verificar sync_log",        "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "Ejecuta sync_incremental.py a las 3AM. Notifica por email si hay error.",
+    "version": "1.0.0"
+  }
+}
