@@ -40,7 +40,14 @@ from conectores.relbase.extractor import (
     extraer_stock_todos,
 )
 from conectores.relbase.transformer import transformar
-from conectores.relbase.loader import cargar_entidad, enriquecer_costo_unitario
+from conectores.relbase.loader import (
+    cargar_entidad,
+    cargar_dtes,
+    cargar_stock,
+    construir_lookup,
+    _supabase,
+    _actualizar_sync_log,
+)
 
 load_dotenv()
 
@@ -110,7 +117,7 @@ def _etapa_completa(supabase, etapa: str) -> bool:
     """Consulta sync_log para saber si una etapa del histórico ya fue cargada."""
     resp = (
         supabase.table("sync_log")
-        .select("ultimo_sync")
+        .select("ultima_sync")
         .eq("entidad", f"historico_{etapa}")
         .maybe_single()
         .execute()
@@ -120,60 +127,73 @@ def _etapa_completa(supabase, etapa: str) -> bool:
 
 def _marcar_etapa(supabase, etapa: str, metricas: dict) -> None:
     ahora = _ahora_iso()
-    supabase.table("sync_log").upsert(
-        {
-            "entidad": f"historico_{etapa}",
-            "ultimo_sync": ahora,
-            "registros_procesados": metricas.get("total_registros", 0),
-            "registros_cargados": metricas.get("total_cargados", 0),
-            "errores": metricas.get("errores", 0),
-            "updated_at": ahora,
-        },
-        on_conflict="entidad",
-    ).execute()
+    payload = {
+        "entidad": f"historico_{etapa}",
+        "fuente": "relbase",
+        "ultima_sync": ahora,
+        "registros_nuevos": metricas.get("total_cargados", metricas.get("lineas_cargadas", 0)),
+        "registros_error": metricas.get("errores", 0),
+        "estado": "ok" if metricas.get("errores", 0) == 0 else "error_parcial",
+    }
+    try:
+        supabase.table("sync_log").insert(payload).execute()
+    except Exception as e:
+        logger.warning("sync_log insert falló para etapa '%s': %s", etapa, e)
 
 
 # ---------------------------------------------------------------------------
 # Etapas del pipeline
 # ---------------------------------------------------------------------------
 
-def etapa_bodegas(client: RelbaseClient, supabase, continuar: bool) -> dict:
+def etapa_bodegas(client: RelbaseClient, supabase, continuar: bool) -> tuple[dict, dict]:
+    """Retorna (metricas, bodegas_map {relbase_id: db_id})."""
     logger.info("── Etapa 1/6: Bodegas ──")
     if continuar and _etapa_completa(supabase, "bodegas"):
         logger.info("Etapa ya completada. Saltando.")
-        return {}
+        bodegas_map = construir_lookup(supabase, "bodegas")
+        return {}, bodegas_map
 
     crudos = extraer_bodegas(client._session)
     transformados = transformar("bodegas", crudos)
     metricas = cargar_entidad("bodegas", transformados)
     _marcar_etapa(supabase, "bodegas", metricas)
-    return metricas
+    bodegas_map = construir_lookup(supabase, "bodegas")
+    logger.info("Bodegas map: %d entradas", len(bodegas_map))
+    return metricas, bodegas_map
 
 
-def etapa_productos(client: RelbaseClient, supabase, continuar: bool) -> dict:
+def etapa_productos(client: RelbaseClient, supabase, continuar: bool) -> tuple[dict, dict]:
+    """Retorna (metricas, productos_map {relbase_id: db_id})."""
     logger.info("── Etapa 2/6: Productos ──")
     if continuar and _etapa_completa(supabase, "productos"):
         logger.info("Etapa ya completada. Saltando.")
-        return {}
+        productos_map = construir_lookup(supabase, "productos")
+        return {}, productos_map
 
     crudos = extraer_productos(client._session)
     transformados = transformar("productos", crudos)
     metricas = cargar_entidad("productos", transformados)
     _marcar_etapa(supabase, "productos", metricas)
-    return metricas
+    productos_map = construir_lookup(supabase, "productos")
+    logger.info("Productos map: %d entradas", len(productos_map))
+    return metricas, productos_map
 
 
-def etapa_clientes(client: RelbaseClient, supabase, continuar: bool) -> dict:
+def etapa_clientes(client: RelbaseClient, supabase, continuar: bool) -> tuple[dict, dict]:
+    """Retorna (metricas, clientes_map {relbase_id: db_id})."""
     logger.info("── Etapa 3/6: Clientes ──")
     if continuar and _etapa_completa(supabase, "clientes"):
         logger.info("Etapa ya completada. Saltando.")
-        return {}
+        clientes_map = construir_lookup(supabase, "clientes")
+        return {}, clientes_map
 
     crudos = extraer_clientes(client._session)
     transformados = transformar("clientes", crudos)
     metricas = cargar_entidad("clientes", transformados)
     _marcar_etapa(supabase, "clientes", metricas)
-    return metricas
+    clientes_map = construir_lookup(supabase, "clientes")
+    logger.info("Clientes map: %d entradas", len(clientes_map))
+    return metricas, clientes_map
 
 
 def etapa_ventas(
@@ -182,10 +202,12 @@ def etapa_ventas(
     continuar: bool,
     desde: str,
     hasta: str,
-) -> dict:
+    clientes_map: dict,
+    bodegas_map: dict,
+) -> tuple[dict, dict]:
     """
-    Carga DTEs por tramos mensuales para evitar requests enormes y facilitar
-    la reanudación si el proceso se interrumpe.
+    Carga DTEs por tramos mensuales.
+    Retorna (metricas, ventas_map {relbase_id: db_id}).
     """
     logger.info("── Etapa 4/6: Ventas (DTEs %s → %s) ──", desde, hasta)
 
@@ -197,14 +219,13 @@ def etapa_ventas(
     while cursor <= fecha_fin:
         fin_mes = _sumar_mes(cursor) - timedelta(days=1)
         fin_mes = min(fin_mes, fecha_fin)
-
-        tramo = f"{cursor.strftime('%Y-%m')}"
+        tramo = cursor.strftime("%Y-%m")
         entidad_log = f"ventas_{tramo}"
 
         if continuar and _etapa_completa(supabase, entidad_log):
             logger.info("Tramo %s ya cargado. Saltando.", tramo)
         else:
-            logger.info("Cargando ventas del tramo %s...", tramo)
+            logger.info("Cargando ventas tramo %s...", tramo)
             crudos = extraer_dtes(
                 client._session,
                 tipos=TIPOS_DTE,
@@ -212,71 +233,59 @@ def etapa_ventas(
                 hasta_fecha=fin_mes.strftime("%Y-%m-%d"),
             )
             transformados = transformar("dtes", crudos)
-            metricas = cargar_entidad("dtes", transformados, actualizar_sync=False)
+            metricas = cargar_entidad(
+                "dtes", transformados,
+                actualizar_sync=False,
+                clientes_map=clientes_map,
+                bodegas_map=bodegas_map,
+            )
             _marcar_etapa(supabase, entidad_log, metricas)
-
             metricas_total["total_registros"] += metricas.get("total_registros", 0)
             metricas_total["total_cargados"] += metricas.get("total_cargados", 0)
             metricas_total["errores"] += metricas.get("errores", 0)
 
         cursor = _sumar_mes(cursor)
 
-    # Registra totales en sync_log con clave canónica
     _marcar_etapa(supabase, "ventas", metricas_total)
-    return metricas_total
+    ventas_map = construir_lookup(supabase, "ventas")
+    logger.info("Ventas map: %d entradas", len(ventas_map))
+    return metricas_total, ventas_map
 
 
-def etapa_ventas_detalle(supabase, continuar: bool) -> dict:
-    """
-    Delega en extractor_detalle.py, que lee ventas desde Supabase
-    y consulta el detalle de cada DTE en Relbase.
-    """
+def etapa_ventas_detalle(supabase, continuar: bool, ventas_map: dict, productos_map: dict) -> dict:
+    """Extrae líneas de detalle desde Relbase y las carga en ventas_detalle."""
     logger.info("── Etapa 5/6: Ventas detalle ──")
     if continuar and _etapa_completa(supabase, "ventas_detalle"):
         logger.info("Etapa ya completada. Saltando.")
         return {}
 
-    # Importación local para no crear dependencia circular en tests
     from conectores.relbase.extractor_detalle import extraer_y_cargar_detalles
-
-    # batch_size=0 → procesa todos los DTEs sin límite
-    metricas = extraer_y_cargar_detalles(batch_size=0)
+    metricas = extraer_y_cargar_detalles(batch_size=0, ventas_map=ventas_map, productos_map=productos_map)
     _marcar_etapa(supabase, "ventas_detalle", metricas)
-
-    # Enriquece costo_unitario cruzando con productos
-    logger.info("Enriqueciendo costo_unitario en ventas_detalle...")
-    enriquecer_costo_unitario(supabase)
-
     return metricas
 
 
-def etapa_stock(client: RelbaseClient, supabase, continuar: bool) -> dict:
-    """Toma un snapshot de stock actual para todos los productos cargados."""
+def etapa_stock(client: RelbaseClient, supabase, continuar: bool, productos_map: dict, bodegas_map: dict) -> dict:
+    """Snapshot de stock actual para todos los productos cargados."""
     logger.info("── Etapa 6/6: Stock (snapshot actual) ──")
     if continuar and _etapa_completa(supabase, "stock"):
         logger.info("Etapa ya completada. Saltando.")
         return {}
 
-    # Obtiene IDs de productos desde Supabase (ya cargados en etapa 2)
-    resp = (
-        supabase.table("productos")
-        .select("producto_id_relbase")
-        .execute()
-    )
-    ids_productos = [
-        row["producto_id_relbase"]
-        for row in (resp.data or [])
-        if row.get("producto_id_relbase")
-    ]
-
-    if not ids_productos:
+    # relbase_id de productos (no el DB id) para consultar stock en Relbase
+    ids_relbase = list(productos_map.keys())
+    if not ids_relbase:
         logger.warning("No hay productos en Supabase. Ejecuta etapa_productos primero.")
         return {"total_registros": 0, "total_cargados": 0, "errores": 1}
 
-    logger.info("Obteniendo stock de %d productos...", len(ids_productos))
-    crudos = extraer_stock_todos(client._session, ids_productos)
+    logger.info("Obteniendo stock de %d productos...", len(ids_relbase))
+    crudos = extraer_stock_todos(client._session, ids_relbase)
     transformados = transformar("stock", crudos)
-    metricas = cargar_entidad("stock", transformados)
+    metricas = cargar_entidad(
+        "stock", transformados,
+        productos_map=productos_map,
+        bodegas_map=bodegas_map,
+    )
     _marcar_etapa(supabase, "stock", metricas)
     return metricas
 
@@ -324,29 +333,47 @@ def ejecutar_pipeline(
     logger.info("=" * 60)
 
     resumen = {}
+    # Maps {relbase_id: db_id} que se construyen tras cada carga y se pasan a etapas dependientes
+    bodegas_map: dict = {}
+    clientes_map: dict = {}
+    productos_map: dict = {}
+    ventas_map: dict = {}
 
     with RelbaseClient() as client:
 
         if "bodegas" in etapas_a_ejecutar:
-            resumen["bodegas"] = etapa_bodegas(client, supabase, continuar)
+            resumen["bodegas"], bodegas_map = etapa_bodegas(client, supabase, continuar)
+        elif any(e in etapas_a_ejecutar for e in ["ventas", "stock"]):
+            # Necesitamos el map aunque no carguemos bodegas
+            from conectores.relbase.loader import construir_lookup
+            bodegas_map = construir_lookup(supabase, "bodegas")
 
         if "productos" in etapas_a_ejecutar:
-            resumen["productos"] = etapa_productos(client, supabase, continuar)
+            resumen["productos"], productos_map = etapa_productos(client, supabase, continuar)
+        elif any(e in etapas_a_ejecutar for e in ["ventas_detalle", "stock"]):
+            from conectores.relbase.loader import construir_lookup
+            productos_map = construir_lookup(supabase, "productos")
 
         if "clientes" in etapas_a_ejecutar:
-            resumen["clientes"] = etapa_clientes(client, supabase, continuar)
+            resumen["clientes"], clientes_map = etapa_clientes(client, supabase, continuar)
+        elif "ventas" in etapas_a_ejecutar:
+            from conectores.relbase.loader import construir_lookup
+            clientes_map = construir_lookup(supabase, "clientes")
 
         if "ventas" in etapas_a_ejecutar:
-            resumen["ventas"] = etapa_ventas(client, supabase, continuar, desde, hasta)
+            resumen["ventas"], ventas_map = etapa_ventas(
+                client, supabase, continuar, desde, hasta, clientes_map, bodegas_map
+            )
+        elif "ventas_detalle" in etapas_a_ejecutar:
+            from conectores.relbase.loader import construir_lookup
+            ventas_map = construir_lookup(supabase, "ventas")
 
-    # ventas_detalle y stock no necesitan RelbaseClient abierto continuamente
-    # (abren su propia sesión internamente)
     if "ventas_detalle" in etapas_a_ejecutar:
-        resumen["ventas_detalle"] = etapa_ventas_detalle(supabase, continuar)
+        resumen["ventas_detalle"] = etapa_ventas_detalle(supabase, continuar, ventas_map, productos_map)
 
     if "stock" in etapas_a_ejecutar:
         with RelbaseClient() as client:
-            resumen["stock"] = etapa_stock(client, supabase, continuar)
+            resumen["stock"] = etapa_stock(client, supabase, continuar, productos_map, bodegas_map)
 
     duracion_total = (datetime.now(timezone.utc) - inicio_total).total_seconds()
 

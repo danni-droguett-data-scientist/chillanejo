@@ -19,6 +19,7 @@ Uso:
 import os
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, date
 from typing import Optional, Generator
 
@@ -32,7 +33,10 @@ logger = logging.getLogger("relbase.extractor")
 RELBASE_BASE_URL = os.getenv("RELBASE_BASE_URL", "https://api.relbase.cl/api/v1")
 RELBASE_TOKEN_USUARIO = os.getenv("RELBASE_TOKEN_USUARIO")
 RELBASE_TOKEN_EMPRESA = os.getenv("RELBASE_TOKEN_EMPRESA")
-RATE_LIMIT_SLEEP = float(os.getenv("RELBASE_RATE_LIMIT_SLEEP", "0.15"))
+RATE_LIMIT_SLEEP = float(os.getenv("RELBASE_RATE_LIMIT_SLEEP", "0.0"))
+# Workers paralelos para paginación — seguro porque la latencia (~850ms) es el cuello
+# de botella, no el rate limit de Relbase (probado: 0 errores 429 con sleep=0)
+MAX_WORKERS = int(os.getenv("RELBASE_MAX_WORKERS", "5"))
 
 # Tipos de DTE a extraer (boletas, facturas, notas de venta)
 TIPOS_DTE = [33, 39, 1001]
@@ -79,9 +83,35 @@ def _get(session: requests.Session, endpoint: str, params: dict = None) -> dict:
     return response.json()
 
 
+def _extraer_lista_de_data(data) -> list:
+    """
+    Relbase devuelve data como dict con la lista anidada (ej. data.products).
+    Extrae el primer valor que sea una lista no vacía, o la lista directa.
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for val in data.values():
+            if isinstance(val, list):
+                return val
+    return []
+
+
 # ---------------------------------------------------------------------------
 # Extracción paginada genérica
 # ---------------------------------------------------------------------------
+
+def _fetch_pagina(session: requests.Session, endpoint: str, params: dict, pagina: int) -> tuple[int, list]:
+    """Descarga una página específica. Retorna (pagina, registros)."""
+    p = dict(params)
+    p["page"] = pagina
+    try:
+        respuesta = _get(session, endpoint, p)
+        return pagina, _extraer_lista_de_data(respuesta.get("data", []))
+    except Exception as e:
+        logger.error("Error en %s página %d: %s", endpoint, pagina, e)
+        return pagina, []
+
 
 def _paginar(
     session: requests.Session,
@@ -89,37 +119,49 @@ def _paginar(
     params: dict = None,
 ) -> Generator[list, None, None]:
     """
-    Itera páginas de un endpoint hasta que meta.next_page sea null.
-    Yield: lista de registros de cada página.
+    Descarga página 1 para conocer total_pages, luego las páginas restantes
+    en paralelo con MAX_WORKERS workers. Yield: lista de registros por página
+    en orden numérico.
+    Relbase devuelve data como dict anidado (ej. {"products": [...]}).
     """
-    pagina = 1
-    params = params or {}
+    params = dict(params or {})
 
-    while True:
-        params["page"] = pagina
-        logger.debug("GET %s página %d", endpoint, pagina)
+    # Página 1 siempre secuencial para obtener metadata de paginación
+    try:
+        primera = _get(session, endpoint, {**params, "page": 1})
+    except Exception as e:
+        logger.error("Error en %s página 1: %s", endpoint, e)
+        return
 
-        try:
-            respuesta = _get(session, endpoint, params)
-        except requests.exceptions.HTTPError as e:
-            logger.error("Error HTTP en %s página %d: %s", endpoint, pagina, e)
-            break
-        except requests.exceptions.RequestException as e:
-            logger.error("Error de red en %s página %d: %s", endpoint, pagina, e)
-            break
+    data_p1 = _extraer_lista_de_data(primera.get("data", []))
+    if not data_p1:
+        return
+    yield data_p1
 
-        data = respuesta.get("data", [])
-        if not data:
-            break
+    meta = primera.get("meta", {})
+    total_pages = int(meta.get("total_pages") or 1)
+    if total_pages <= 1:
+        return
 
-        yield data
+    # Páginas 2..N en paralelo
+    paginas_restantes = list(range(2, total_pages + 1))
+    logger.debug("GET %s — descargando %d páginas con %d workers", endpoint, len(paginas_restantes), MAX_WORKERS)
 
-        # Verifica si hay siguiente página
-        meta = respuesta.get("meta", {})
-        siguiente = meta.get("next_page") or meta.get("nextPage")
-        if not siguiente:
-            break
-        pagina += 1
+    resultados: dict[int, list] = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futuros = {
+            pool.submit(_fetch_pagina, session, endpoint, params, p): p
+            for p in paginas_restantes
+        }
+        for futuro in as_completed(futuros):
+            pagina, datos = futuro.result()
+            if datos:
+                resultados[pagina] = datos
+
+    # Yield en orden para mantener consistencia
+    for p in paginas_restantes:
+        if p in resultados:
+            yield resultados[p]
 
 
 # ---------------------------------------------------------------------------
@@ -176,18 +218,19 @@ def extraer_dtes(
 
     Args:
         tipos: lista de tipos DTE a extraer. Default: TIPOS_DTE.
-        desde_fecha: ISO date YYYY-MM-DD, para extracción incremental.
-        hasta_fecha: ISO date YYYY-MM-DD, límite superior.
+        desde_fecha: ISO date YYYY-MM-DD — filtro start_date en Relbase.
+        hasta_fecha: ISO date YYYY-MM-DD — filtro end_date en Relbase.
     """
     tipos = tipos or TIPOS_DTE
     todos_los_dtes = []
 
     for tipo in tipos:
-        params = {"tipo_dte": tipo}
+        # Relbase requiere type_document (no tipo_dte); fechas: start_date/end_date
+        params = {"type_document": tipo}
         if desde_fecha:
-            params["fecha_desde"] = desde_fecha
+            params["start_date"] = desde_fecha
         if hasta_fecha:
-            params["fecha_hasta"] = hasta_fecha
+            params["end_date"] = hasta_fecha
 
         registros_tipo = []
         for pagina in _paginar(session, "/dtes", params):
@@ -202,12 +245,19 @@ def extraer_dtes(
 
 def extraer_bodegas(session: requests.Session) -> list[dict]:
     """
-    Extrae bodegas. Solo se usa en el seed inicial.
-    Relbase generalmente devuelve pocas bodegas (no necesita paginación real).
+    Extrae bodegas. Relbase las devuelve en data.warehouses sin paginación.
     """
-    registros = []
-    for pagina in _paginar(session, "/bodegas"):
-        registros.extend(pagina)
+    try:
+        respuesta = _get(session, "/bodegas")
+        data = respuesta.get("data", {})
+        # Relbase devuelve {"warehouses": [...]} dentro de data
+        if isinstance(data, dict):
+            registros = data.get("warehouses", [])
+        else:
+            registros = _extraer_lista_de_data(data)
+    except requests.exceptions.RequestException as e:
+        logger.error("Error al obtener bodegas: %s", e)
+        registros = []
 
     logger.info("Bodegas extraídas: %d", len(registros))
     return registros
@@ -219,16 +269,19 @@ def extraer_stock_por_producto(
 ) -> list[dict]:
     """
     GET /api/v1/productos/{id}/stock_por_bodegas
-    Retorna el stock de un producto por cada bodega.
-    Incluye el producto_id en cada registro para facilitar la carga.
+    Relbase devuelve data.stocks[]. Agrega _producto_id_relbase a cada fila.
     """
     try:
         respuesta = _get(session, f"/productos/{producto_id}/stock_por_bodegas")
-        data = respuesta.get("data", [])
-        # Agrega el id del producto a cada fila de stock
-        for fila in data:
+        data = respuesta.get("data", {})
+        # Relbase devuelve {"stocks": [...]} dentro de data
+        if isinstance(data, dict):
+            filas = data.get("stocks", [])
+        else:
+            filas = _extraer_lista_de_data(data)
+        for fila in filas:
             fila["_producto_id_relbase"] = producto_id
-        return data
+        return filas
     except requests.exceptions.HTTPError as e:
         logger.error("Error al obtener stock del producto %d: %s", producto_id, e)
         return []
