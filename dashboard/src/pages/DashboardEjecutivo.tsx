@@ -4,7 +4,7 @@ import { TarjetaKpi } from "@/components/dashboard/TarjetaKpi";
 import { GraficoTendencia } from "@/components/ejecutivo/GraficoTendencia";
 import { GraficoMargen } from "@/components/ejecutivo/GraficoMargen";
 import { TablaTopProductos } from "@/components/dashboard/TablaTopProductos";
-import { clp, pct, variacion } from "@/lib/formato";
+import { pct, variacion } from "@/lib/formato";
 
 export default function DashboardEjecutivo() {
   const { tendencia, margenCategorias, topProductos, margenResumen, cargando, error, refetch } =
@@ -21,14 +21,16 @@ export default function DashboardEjecutivo() {
 
   // Adapta topProductos al tipo esperado por TablaTopProductos
   const topAdaptado = topProductos.map((p, i) => ({
-    codigo_producto: p.codigo_producto,
-    nombre_producto: p.nombre_producto,
-    unidades_vendidas: p.unidades_totales,
-    ingresos_netos: p.ingresos_netos_total,
-    margen_neto_total: p.margen_neto_total,
-    margen_pct: p.margen_pct,
-    num_transacciones: p.num_transacciones,
-    rank_ingresos: i + 1,
+    codigo_producto:    p.codigo_producto,
+    nombre_producto:    p.nombre_producto,
+    unidades_vendidas:  p.unidades_totales,
+    ingresos_netos:     p.ingresos_netos_total,
+    ingresos_presencial: p.ingresos_netos_total,
+    ingresos_online:    0,
+    margen_neto_total:  p.margen_neto_total,
+    margen_pct:         p.margen_pct,
+    num_transacciones:  p.num_transacciones,
+    rank_ingresos:      i + 1,
   }));
 
   return (

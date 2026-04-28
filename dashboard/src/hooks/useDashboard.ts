@@ -19,6 +19,11 @@ export interface KpisVentas {
   mes_anterior: { ingresos_netos: number; num_ventas: number };
 }
 
+export interface DesglosCanal {
+  presencial: KpiPeriodo;
+  online: KpiPeriodo;
+}
+
 export interface VentaDia {
   fecha: string;
   ingresos_netos: number;
@@ -30,6 +35,8 @@ export interface TopProducto {
   nombre_producto: string;
   unidades_vendidas: number;
   ingresos_netos: number;
+  ingresos_presencial: number;
+  ingresos_online: number;
   margen_neto_total: number | null;
   margen_pct: number | null;
   num_transacciones: number;
@@ -67,6 +74,8 @@ export interface UltimaVenta {
 
 export interface DashboardData {
   kpis: KpisVentas | null;
+  desglosHoy: DesglosCanal | null;
+  desglossemana: DesglosCanal | null;
   ventasPorDia: VentaDia[];
   topProductos: TopProducto[];
   stockCritico: StockCritico[];
@@ -92,13 +101,23 @@ const NIVEL_ALERTA = (cantidad: number): StockCritico["nivel_alerta"] =>
   cantidad <= 0 ? "sin_stock" : cantidad <= 5 ? "critico" : "bajo";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers de fecha — usan hora local (Santiago), NO UTC
 // ---------------------------------------------------------------------------
+
+// Formatea una Date usando componentes locales (año/mes/día del navegador).
+// Evita el bug de timezone: new Date().toISOString() devuelve UTC, lo que
+// después de las ~21-22h local (Chile UTC-3) retorna la fecha del día siguiente.
+function fechaLocal(d: Date): string {
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
 
 function inicioSemana(d: Date): string {
   const lunes = new Date(d);
   lunes.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-  return lunes.toISOString().slice(0, 10);
+  return fechaLocal(lunes);
 }
 
 function calcKpi(rows: { neto: number; total: number }[]): KpiPeriodo {
@@ -138,7 +157,8 @@ async function fetchVentasPaginado(
   return all;
 }
 
-// Top productos: pagina ventas_detalle con join a ventas filtrado por mes
+// Top productos: pagina ventas_detalle con join a ventas filtrado por mes.
+// Incluye canal para desgloses y filtros en la UI.
 async function fetchTopProductos(inicioMes: string, hoy: string): Promise<TopProducto[]> {
   const PAGE = 1000;
   const MAX_PAGES = 10;
@@ -148,7 +168,7 @@ async function fetchTopProductos(inicioMes: string, hoy: string): Promise<TopPro
     const { data, error } = await supabase
       .from("ventas_detalle")
       .select(
-        "relbase_producto_id, sku, nombre_producto, cantidad, total_neto, costo_unitario, venta_id, ventas!inner(fecha_emision)"
+        "relbase_producto_id, sku, nombre_producto, cantidad, total_neto, costo_unitario, venta_id, ventas!inner(fecha_emision, canal)"
       )
       .gte("ventas.fecha_emision", inicioMes)
       .lte("ventas.fecha_emision", hoy)
@@ -165,6 +185,8 @@ async function fetchTopProductos(inicioMes: string, hoy: string): Promise<TopPro
     nombre_producto: string;
     unidades: number;
     ingresos: number;
+    ingresos_presencial: number;
+    ingresos_online: number;
     margen: number;
     tieneMargen: boolean;
     ventaIds: Set<string>;
@@ -177,15 +199,24 @@ async function fetchTopProductos(inicioMes: string, hoy: string): Promise<TopPro
       map.set(key, {
         codigo_producto: r.sku ?? String(key),
         nombre_producto: r.nombre_producto ?? "Sin nombre",
-        unidades: 0, ingresos: 0, margen: 0,
-        tieneMargen: false, ventaIds: new Set(),
+        unidades: 0, ingresos: 0, ingresos_presencial: 0, ingresos_online: 0,
+        margen: 0, tieneMargen: false, ventaIds: new Set(),
       });
     }
-    const p = map.get(key)!;
-    p.unidades += r.cantidad   ?? 0;
-    p.ingresos += r.total_neto ?? 0;
+    const p  = map.get(key)!;
+    const tn = r.total_neto ?? 0;
+    const canal = (r.ventas as any)?.canal ?? "presencial";
+    const esOnline = canal !== "presencial";
+
+    p.unidades += r.cantidad ?? 0;
+    p.ingresos += tn;
+    if (esOnline) {
+      p.ingresos_online    += tn;
+    } else {
+      p.ingresos_presencial += tn;
+    }
     if (r.costo_unitario != null) {
-      p.margen     += (r.total_neto ?? 0) - r.costo_unitario * (r.cantidad ?? 0);
+      p.margen     += tn - r.costo_unitario * (r.cantidad ?? 0);
       p.tieneMargen = true;
     }
     if (r.venta_id) p.ventaIds.add(r.venta_id);
@@ -195,11 +226,13 @@ async function fetchTopProductos(inicioMes: string, hoy: string): Promise<TopPro
     .sort((a, b) => b.ingresos - a.ingresos)
     .slice(0, 10)
     .map((p, i) => ({
-      codigo_producto:   p.codigo_producto,
-      nombre_producto:   p.nombre_producto,
-      unidades_vendidas: p.unidades,
-      ingresos_netos:    p.ingresos,
-      margen_neto_total: p.tieneMargen ? p.margen : null,
+      codigo_producto:    p.codigo_producto,
+      nombre_producto:    p.nombre_producto,
+      unidades_vendidas:  p.unidades,
+      ingresos_netos:     p.ingresos,
+      ingresos_presencial: p.ingresos_presencial,
+      ingresos_online:    p.ingresos_online,
+      margen_neto_total:  p.tieneMargen ? p.margen : null,
       margen_pct: p.tieneMargen && p.ingresos > 0
         ? Math.round((p.margen / p.ingresos) * 1000) / 10
         : null,
@@ -214,6 +247,8 @@ async function fetchTopProductos(inicioMes: string, hoy: string): Promise<TopPro
 
 export function useDashboard(): DashboardData {
   const [kpis,                setKpis]                = useState<KpisVentas | null>(null);
+  const [desglosHoy,          setDesglosHoy]          = useState<DesglosCanal | null>(null);
+  const [desglossemana,       setDesglossemana]       = useState<DesglosCanal | null>(null);
   const [ventasPorDia,        setVentasPorDia]        = useState<VentaDia[]>([]);
   const [topProductos,        setTopProductos]        = useState<TopProducto[]>([]);
   const [stockCritico,        setStockCritico]        = useState<StockCritico[]>([]);
@@ -228,20 +263,25 @@ export function useDashboard(): DashboardData {
     setError(null);
 
     try {
-      const ahora        = new Date();
-      const hoy          = ahora.toISOString().slice(0, 10);
+      const ahora = new Date();
+
+      // Todas las fechas calculadas con hora LOCAL (Santiago), no UTC.
+      // Bug previo: toISOString() devuelve UTC → después de ~21h local en Chile
+      // la fecha avanzaba un día y los filtros client-side de "hoy" y "semana"
+      // nunca coincidían con los datos de Relbase → KPIs mostraban $0.
+      const hoy          = fechaLocal(ahora);
       const lunesSemana  = inicioSemana(ahora);
-      const inicioMes    = new Date(ahora.getFullYear(), ahora.getMonth(), 1).toISOString().slice(0, 10);
-      const inicioMesAnt = new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1).toISOString().slice(0, 10);
-      const finMesAnt    = new Date(ahora.getFullYear(), ahora.getMonth(), 0).toISOString().slice(0, 10);
+      const inicioMes    = fechaLocal(new Date(ahora.getFullYear(), ahora.getMonth(), 1));
+      const inicioMesAnt = fechaLocal(new Date(ahora.getFullYear(), ahora.getMonth() - 1, 1));
+      const finMesAnt    = fechaLocal(new Date(ahora.getFullYear(), ahora.getMonth(), 0));
 
       // Fase 1 — cuatro fetches en paralelo:
-      //   · ventas del mes completo (paginado) → KPIs hoy/semana/mes + gráfico
-      //   · ventas mes anterior (paginado)     → KPI mes_anterior
-      //   · stock con embedding                → alertas
-      //   · últimas ventas con embedding       → tabla
+      //   · ventas del mes completo (paginado, incluye canal) → KPIs + gráfico + desglose
+      //   · ventas mes anterior (paginado)                   → KPI mes_anterior
+      //   · stock con embedding                              → alertas
+      //   · últimas ventas con embedding                     → tabla
       const [ventasMes, ventasMesAnt, stockResp, ultimasResp] = await Promise.all([
-        fetchVentasPaginado(inicioMes, hoy, "fecha_emision, neto, total"),
+        fetchVentasPaginado(inicioMes, hoy, "fecha_emision, neto, total, canal"),
         fetchVentasPaginado(inicioMesAnt, finMesAnt, "neto, total"),
         supabase.from("stock")
           .select("cantidad, productos!inner(relbase_id, sku, nombre, activo), bodegas(nombre)")
@@ -256,9 +296,9 @@ export function useDashboard(): DashboardData {
       if (stockResp.error)   throw stockResp.error;
       if (ultimasResp.error) throw ultimasResp.error;
 
-      // KPIs derivados del dataset del mes (sin query extra)
-      const ventasHoy    = ventasMes.filter((v) => (v.fecha_emision as string).slice(0, 10) === hoy);
-      const ventasSemana = ventasMes.filter((v) => (v.fecha_emision as string).slice(0, 10) >= lunesSemana);
+      // KPIs derivados del dataset del mes
+      const ventasHoy    = ventasMes.filter((v) => v.fecha_emision === hoy);
+      const ventasSemana = ventasMes.filter((v) => v.fecha_emision >= lunesSemana);
 
       const kpisData: KpisVentas = {
         hoy:    calcKpi(ventasHoy),
@@ -270,25 +310,36 @@ export function useDashboard(): DashboardData {
         },
       };
 
+      // Desglose por canal (null canal en datos históricos → presencial)
+      const esOnline = (v: any) => (v.canal ?? "presencial") !== "presencial";
+      const desglosHoyData: DesglosCanal = {
+        presencial: calcKpi(ventasHoy.filter((v) => !esOnline(v))),
+        online:     calcKpi(ventasHoy.filter(esOnline)),
+      };
+      const desglossemanaData: DesglosCanal = {
+        presencial: calcKpi(ventasSemana.filter((v) => !esOnline(v))),
+        online:     calcKpi(ventasSemana.filter(esOnline)),
+      };
+
       // Gráfico: agrupa por día y rellena días sin ventas con 0
       const porDiaMap = new Map<string, { ingresos_netos: number; num_ventas: number }>();
       for (const v of ventasMes) {
-        const fecha = (v.fecha_emision as string).slice(0, 10);
+        const fecha = v.fecha_emision as string;
         const e = porDiaMap.get(fecha) ?? { ingresos_netos: 0, num_ventas: 0 };
         e.ingresos_netos += (v.neto as number) ?? 0;
         e.num_ventas     += 1;
         porDiaMap.set(fecha, e);
       }
       const ventasPorDiaData: VentaDia[] = [];
-      const cursor = new Date(`${inicioMes}T12:00:00`);
-      const fin    = new Date(`${hoy}T12:00:00`);
+      const cursor = new Date(ahora.getFullYear(), ahora.getMonth(), 1);
+      const fin    = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
       while (cursor <= fin) {
-        const fecha = cursor.toISOString().slice(0, 10);
+        const fecha = fechaLocal(cursor);
         ventasPorDiaData.push({ fecha, ...( porDiaMap.get(fecha) ?? { ingresos_netos: 0, num_ventas: 0 }) });
         cursor.setDate(cursor.getDate() + 1);
       }
 
-      // Stock crítico desde tablas base
+      // Stock crítico
       const stockData: StockCritico[] = (stockResp.data ?? [])
         .filter((s: any) => s.productos?.activo === true)
         .map((s: any) => ({
@@ -313,7 +364,7 @@ export function useDashboard(): DashboardData {
         total:     stockData.length,
       };
 
-      // Últimas ventas desde tablas base
+      // Últimas ventas
       const ultimasData: UltimaVenta[] = (ultimasResp.data ?? []).map((v: any) => ({
         id:            v.id,
         fecha_emision: v.fecha_emision,
@@ -329,6 +380,8 @@ export function useDashboard(): DashboardData {
       const topData = await fetchTopProductos(inicioMes, hoy);
 
       setKpis(kpisData);
+      setDesglosHoy(desglosHoyData);
+      setDesglossemana(desglossemanaData);
       setVentasPorDia(ventasPorDiaData);
       setTopProductos(topData);
       setStockCritico(stockData);
@@ -353,6 +406,8 @@ export function useDashboard(): DashboardData {
 
   return {
     kpis,
+    desglosHoy,
+    desglossemana,
     ventasPorDia,
     topProductos,
     stockCritico,
