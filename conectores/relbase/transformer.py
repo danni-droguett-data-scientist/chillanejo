@@ -200,6 +200,12 @@ def transformar_dte(dte: dict) -> dict:
         "iva": _float(dte.get("amount_iva") or dte.get("iva")),
         "total": _float(dte.get("amount_total") or dte.get("total")),
         "vendedor": _str(dte.get("vendedor_nombre") or dte.get("vendedor")),
+        "forma_pago": _str(
+            dte.get("payment_method_name")
+            or dte.get("payment_method")
+            or dte.get("forma_pago")
+            or dte.get("tipo_pago")
+        ),
     }
 
 

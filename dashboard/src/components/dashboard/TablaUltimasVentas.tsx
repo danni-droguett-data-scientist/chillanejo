@@ -36,7 +36,8 @@ export function TablaUltimasVentas({ datos, cargando = false }: Props) {
           <tr className="border-b text-xs text-gray-400 uppercase tracking-wide">
             <th className="pb-2 text-left font-medium">Fecha</th>
             <th className="pb-2 text-left font-medium">Tipo</th>
-            <th className="pb-2 text-left font-medium">Cliente</th>
+            <th className="pb-2 text-left font-medium">Folio</th>
+            <th className="pb-2 text-left font-medium">Forma de pago</th>
             <th className="pb-2 text-right font-medium">Total neto</th>
           </tr>
         </thead>
@@ -55,12 +56,11 @@ export function TablaUltimasVentas({ datos, cargando = false }: Props) {
                   {v.tipo_nombre}
                 </span>
               </td>
-              <td className="py-2.5 text-gray-700 truncate max-w-[160px]">
-                {v.es_anonimo ? (
-                  <span className="text-gray-400 italic">Sin identificar</span>
-                ) : (
-                  v.cliente
-                )}
+              <td className="py-2.5 tabular-nums text-gray-700">
+                {v.folio ?? <span className="text-gray-400">—</span>}
+              </td>
+              <td className="py-2.5 text-gray-700">
+                {v.forma_pago ?? <span className="text-gray-400 italic">—</span>}
               </td>
               <td className="py-2.5 text-right tabular-nums font-medium text-gray-800">
                 {clp(v.total_neto)}

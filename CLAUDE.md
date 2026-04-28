@@ -47,8 +47,9 @@ El Chillanejo es una distribuidora de aseo y abarrotes en Chillán. Vende solo d
 - **React + Tailwind CSS + shadcn/ui + recharts/tremor**
 
 ### Pagos
-- **Stripe Connect** — split automático 92/8 (negocio/CEO)
-- **Webpay Plus** — integrado vía Stripe
+- **Mercado Pago Checkout Pro** — pasarela oficial (reemplaza Stripe, decisión 27/04/2026)
+- **Split automático 92/8** (negocio/CEO) vía Mercado Pago OAuth marketplace
+- Webpay, débito y transferencia disponibles dentro del checkout de MP
 
 ### Comunicación
 - **Twilio** — WhatsApp Business API
