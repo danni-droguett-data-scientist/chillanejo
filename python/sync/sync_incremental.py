@@ -23,17 +23,31 @@ from dotenv import load_dotenv
 # --- Configuración ---
 load_dotenv()
 
-RELBASE_BASE_URL = os.environ["RELBASE_BASE_URL"]
-RELBASE_TOKEN_USUARIO = os.environ["RELBASE_TOKEN_USUARIO"]
-RELBASE_TOKEN_EMPRESA = os.environ["RELBASE_TOKEN_EMPRESA"]
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SERVICE_ROLE = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+RELBASE_BASE_URL = os.environ.get("RELBASE_BASE_URL", "")
+RELBASE_TOKEN_USUARIO = os.environ.get("RELBASE_TOKEN_USUARIO", "")
+RELBASE_TOKEN_EMPRESA = os.environ.get("RELBASE_TOKEN_EMPRESA", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger(__name__)
+
+# Debug de variables de entorno al arranque
+_ENV_VARS = {
+    "RELBASE_BASE_URL":      RELBASE_BASE_URL,
+    "RELBASE_TOKEN_USUARIO": RELBASE_TOKEN_USUARIO,
+    "RELBASE_TOKEN_EMPRESA": RELBASE_TOKEN_EMPRESA,
+    "SUPABASE_URL":          SUPABASE_URL,
+    "SUPABASE_SERVICE_ROLE_KEY": SUPABASE_SERVICE_ROLE,
+}
+_presentes = [k for k, v in _ENV_VARS.items() if v]
+_faltantes  = [k for k, v in _ENV_VARS.items() if not v]
+log.debug("Variables de entorno presentes: %s", _presentes)
+if _faltantes:
+    log.warning("Variables de entorno FALTANTES: %s", _faltantes)
 
 
 def fecha_hoy_chile() -> str:
