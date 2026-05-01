@@ -1,207 +1,358 @@
 {
-  "name": "Chillanejo — Sync Incremental Diario v2",
+  "name": "Chillanejo — Sync Incremental Diario v3",
   "nodes": [
+
     {
       "parameters": {
         "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 * * * *"
-            }
-          ]
+          "interval": [{ "field": "cronExpression", "expression": "0 * * * *" }]
         }
       },
       "id": "schedule-trigger",
       "name": "Cron — cada hora",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [240, 300]
+      "position": [200, 300]
     },
+
     {
       "parameters": {
-        "jsCode": "// Fecha actual en hora de Santiago (UTC-3 verano / UTC-4 invierno)\n// toLocaleDateString con 'en-CA' devuelve YYYY-MM-DD, el formato que usa Relbase.\nconst hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });\n\nreturn [{ json: { hoy } }];"
+        "jsCode": "// Fecha de hoy en hora de Santiago usando Intl (sin fetch, puro JS).\n// toLocaleDateString('en-CA') devuelve YYYY-MM-DD.\nconst hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' });\nreturn [{ json: { hoy } }];"
       },
       "id": "set-fecha",
       "name": "Set Fecha Chile",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 300]
+      "position": [420, 300]
     },
+
     {
       "parameters": {
-        "jsCode": "// Fetch paginado de todas las ventas del día desde Relbase.\n// Relbase pagina de a 12 registros (verificar si es 12 o diferente en producción).\n// Rate limit Relbase: 7 req/seg → sleep 150ms entre páginas.\n\nconst hoy = $input.first().json.hoy;\nconst BASE  = process.env.RELBASE_BASE_URL;\nconst AUTH  = process.env.RELBASE_TOKEN_USUARIO;\nconst COMP  = process.env.RELBASE_TOKEN_EMPRESA;\nconst PAGE_SIZE = 12; // ajustar si Relbase usa un tamaño distinto\n\nif (!BASE || !AUTH || !COMP) {\n  throw new Error('Variables RELBASE_BASE_URL, RELBASE_TOKEN_USUARIO o RELBASE_TOKEN_EMPRESA no definidas');\n}\n\nconst todos = [];\nlet pagina = 1;\n\nwhile (true) {\n  const url = `${BASE}/api/v1/dtes?start_date=${hoy}&end_date=${hoy}&page=${pagina}`;\n  const res = await fetch(url, {\n    headers: {\n      'Authorization': AUTH,\n      'Company': COMP,\n    }\n  });\n\n  if (!res.ok) {\n    throw new Error(`Relbase error ${res.status} en /api/v1/dtes?page=${pagina}: ${await res.text()}`);\n  }\n\n  const data = await res.json();\n  // Relbase puede devolver array directo o { data: [...] } según versión\n  const lista = Array.isArray(data) ? data : (data.data || data.dtes || []);\n  todos.push(...lista);\n\n  if (lista.length < PAGE_SIZE) break; // última página\n  pagina++;\n  await new Promise(r => setTimeout(r, 150));\n}\n\nreturn todos.map(dte => ({ json: dte }));"
+        "method": "GET",
+        "url": "={{ $env.RELBASE_BASE_URL + '/api/v1/dtes' }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $env.RELBASE_TOKEN_USUARIO }}" },
+            { "name": "Company",       "value": "={{ $env.RELBASE_TOKEN_EMPRESA }}"  }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "start_date", "value": "={{ $('Set Fecha Chile').item.json.hoy }}" },
+            { "name": "end_date",   "value": "={{ $('Set Fecha Chile').item.json.hoy }}" },
+            { "name": "page",       "value": "1" }
+          ]
+        },
+        "options": {
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameter",
+              "parameters": {
+                "parameters": [
+                  { "name": "page", "value": "={{ $pageCount + 1 }}" }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !Array.isArray($response.body) || $response.body.length < 12 }}",
+              "limitPagesFetched": false,
+              "requestInterval": 150
+            }
+          }
+        }
       },
       "id": "fetch-ventas-relbase",
-      "name": "Fetch Ventas Relbase (paginado)",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [720, 300]
+      "name": "Fetch Ventas Relbase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [640, 300]
     },
+
     {
       "parameters": {
-        "jsCode": "// Mapea cada DTE al schema real de Supabase.\n// Schema ventas (verificado contra PostgREST / transformer.py):\n//   relbase_id, tipo_documento, folio, estado_sii, fecha_emision,\n//   neto, iva, total, vendedor, canal, forma_pago\n// cliente_id y bodega_id (FKs uuid) se resuelven en el loader Python;\n// en este sync se omiten deliberadamente para no bloquear el upsert diario.\n\nreturn $input.all().map(item => {\n  const d = item.json;\n  return {\n    json: {\n      relbase_id:    d.id,\n      tipo_documento: d.type_document || d.tipo_documento,\n      folio:         d.folio          || null,\n      estado_sii:    d.sii_status_name || d.estado_sii || null,\n      fecha_emision: (d.start_date || d.fecha_emision || '').slice(0, 10) || null,\n      neto:          d.amount_neto   || d.neto  || 0,\n      iva:           d.amount_iva    || d.iva   || 0,\n      total:         d.amount_total  || d.total || 0,\n      vendedor:      d.vendedor_nombre || d.vendedor || null,\n      forma_pago:    d.payment_method_name || d.payment_method || d.forma_pago || null,\n      canal:         'presencial',\n    }\n  };\n});"
+        "jsCode": "// Transforma DTEs de Relbase al schema real de Supabase.\n// Fuente de verdad de columnas: transformer.py del proyecto.\n// FKs cliente_id y bodega_id se omiten — el loader Python los resuelve\n// en syncs históricos; el sync diario solo necesita los campos analíticos.\nreturn $input.all().map(item => {\n  const d = item.json;\n  return { json: {\n    relbase_id:     d.id,\n    tipo_documento: d.type_document  || d.tipo_documento || null,\n    folio:          d.folio          || null,\n    estado_sii:     d.sii_status_name || d.estado_sii   || null,\n    fecha_emision:  (d.start_date    || d.fecha_emision || '').slice(0, 10) || null,\n    neto:           d.amount_neto    || d.neto          || 0,\n    iva:            d.amount_iva     || d.iva           || 0,\n    total:          d.amount_total   || d.total         || 0,\n    vendedor:       d.vendedor_nombre || d.vendedor     || null,\n    forma_pago:     d.payment_method_name || d.payment_method || d.forma_pago || null,\n    canal:          'presencial'\n  }};\n});"
       },
       "id": "mapear-ventas",
-      "name": "Mapear Ventas + canal=presencial",
+      "name": "Mapear Ventas",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [960, 300]
+      "position": [860, 300]
     },
+
     {
       "parameters": {
-        "url": "={{ $env.SUPABASE_URL }}/rest/v1/ventas",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
+        "jsCode": "// Agrega todos los items en un único array para el upsert batch en Supabase.\n// Un solo item de salida evita múltiples requests HTTP.\nconst ventas = $input.all().map(i => i.json);\nreturn [{ json: { __ventas: ventas, __total: ventas.length } }];"
+      },
+      "id": "juntar-ventas",
+      "name": "Juntar Ventas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 300]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL + '/rest/v1/ventas' }}",
+        "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Prefer",        "value": "resolution=merge-duplicates,return=representation" },
-            { "name": "Content-Type",  "value": "application/json" }
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" },
+            { "name": "Prefer",        "value": "resolution=merge-duplicates" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $input.all().map(i => i.json) }}",
+        "jsonBody": "={{ $json.__ventas }}",
         "options": {}
       },
       "id": "upsert-ventas",
       "name": "Upsert Ventas Supabase",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1200, 300]
+      "position": [1300, 300]
     },
+
     {
       "parameters": {
-        "jsCode": "// Recibe las ventas con UUID ya asignado por Supabase (return=representation).\n// Por cada venta, llama a GET /api/v1/dtes/{relbase_id} para obtener las líneas.\n// Mapea las líneas al schema de ventas_detalle.\n\nconst BASE = process.env.RELBASE_BASE_URL;\nconst AUTH = process.env.RELBASE_TOKEN_USUARIO;\nconst COMP = process.env.RELBASE_TOKEN_EMPRESA;\n\n// $input puede venir como array de objetos o como un objeto con array\nconst ventasSupabase = $input.all().map(i => {\n  // Supabase retorna array; n8n puede envolverlo en item.json o directo\n  if (Array.isArray(i.json)) return i.json;\n  return [i.json];\n}).flat();\n\nconst todasLineas = [];\n\nfor (const venta of ventasSupabase) {\n  const dteId   = venta.relbase_id;\n  const ventaId = venta.id; // UUID de Supabase\n\n  if (!dteId) continue;\n\n  const url = `${BASE}/api/v1/dtes/${dteId}`;\n  const res = await fetch(url, {\n    headers: { 'Authorization': AUTH, 'Company': COMP }\n  });\n\n  if (!res.ok) {\n    // No lanzar: continuar con el siguiente DTE y loguear\n    console.error(`Detalle DTE ${dteId} error: ${res.status}`);\n    continue;\n  }\n\n  const dte   = await res.json();\n  // Relbase devuelve las líneas en distintos campos según versión\n  const items = dte.items || dte.details || dte.lines || dte.detalles || [];\n\n  for (let i = 0; i < items.length; i++) {\n    const it = items[i];\n    const cantidad = it.quantity ?? it.cantidad ?? 0;\n    const precio   = it.price    ?? it.precio_unitario;\n    const descuento = it.discount ?? it.descuento_pct ?? 0;\n    const totalNeto = it.total ?? it.total_neto\n      ?? (precio && cantidad ? parseFloat((precio * cantidad * (1 - descuento / 100)).toFixed(2)) : null);\n\n    todasLineas.push({\n      json: {\n        dte_id_relbase:      dteId,\n        venta_id:            ventaId,\n        numero_linea:        i + 1,\n        relbase_producto_id: it.product_id  || it.relbase_producto_id || null,\n        nombre_producto:     it.name        || it.nombre_producto     || it.descripcion || null,\n        sku:                 it.code        || it.sku                 || it.codigo      || null,\n        cantidad,\n        precio_unitario:     precio         ?? null,\n        costo_unitario:      it.unit_cost   || it.costo_unitario      || null,\n        descuento_pct:       descuento,\n        afecto_iva:          it.is_tax_affected !== undefined ? it.is_tax_affected : true,\n        total_neto:          totalNeto,\n      }\n    });\n  }\n\n  await new Promise(r => setTimeout(r, 150)); // rate limit Relbase\n}\n\nif (!todasLineas.length) {\n  return [{ json: { _sin_detalle: true } }];\n}\n\nreturn todasLineas;"
-      },
-      "id": "fetch-detalle-relbase",
-      "name": "Fetch + Mapear Detalle por DTE",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [1440, 300]
-    },
-    {
-      "parameters": {
-        "url": "={{ $env.SUPABASE_URL }}/rest/v1/ventas_detalle",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL + '/rest/v1/ventas?select=id,relbase_id&fecha_emision=eq.' + $('Set Fecha Chile').item.json.hoy }}",
+        "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Prefer",        "value": "resolution=merge-duplicates" },
-            { "name": "Content-Type",  "value": "application/json" }
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-ids-supabase",
+      "name": "Fetch IDs Ventas Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1520, 300]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Expande el array de ventas (id+relbase_id) en items individuales\n// para que SplitInBatches pueda iterar uno por uno.\nconst arr = $input.first().json;\nconst items = Array.isArray(arr) ? arr : [];\nif (!items.length) return [{ json: { _empty: true } }];\nreturn items.map(v => ({ json: v }));"
+      },
+      "id": "expandir-ventas",
+      "name": "Expandir Ventas",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1740, 300]
+    },
+
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-dtes",
+      "name": "Loop Detalle por DTE",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1960, 300]
+    },
+
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.RELBASE_BASE_URL + '/api/v1/dtes/' + $json.relbase_id }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $env.RELBASE_TOKEN_USUARIO }}" },
+            { "name": "Company",       "value": "={{ $env.RELBASE_TOKEN_EMPRESA }}"  }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-detalle",
+      "name": "Fetch Detalle Relbase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2180, 300]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Mapea líneas del DTE al schema de ventas_detalle.\n// $input.item.json = respuesta de /api/v1/dtes/{id} (el detalle)\n// $('Loop Detalle por DTE').item.json = venta actual del loop (tiene .id UUID y .relbase_id)\nconst detalle = $input.item.json;\nconst venta   = $('Loop Detalle por DTE').item.json;\n\nconst lineas  = detalle.items || detalle.details || detalle.lines || detalle.detalles || [];\nconst ventaId = venta.id;          // UUID Supabase\nconst dteId   = venta.relbase_id;  // Integer Relbase\n\nif (!lineas.length) return [{ json: { _vacio: true } }];\n\nreturn lineas.map((it, i) => {\n  const cantidad  = it.quantity   ?? it.cantidad       ?? 0;\n  const precio    = it.price      ?? it.precio_unitario ?? null;\n  const descuento = it.discount   ?? it.descuento_pct  ?? 0;\n  const totalNeto = it.total      ?? it.total_neto     ??\n    (precio && cantidad ? Math.round(precio * cantidad * (1 - descuento / 100) * 100) / 100 : null);\n  return { json: {\n    dte_id_relbase:      dteId,\n    venta_id:            ventaId,\n    numero_linea:        i + 1,\n    relbase_producto_id: it.product_id  || it.relbase_producto_id || null,\n    nombre_producto:     it.name        || it.nombre_producto     || it.descripcion || null,\n    sku:                 it.code        || it.sku                 || it.codigo      || null,\n    cantidad,\n    precio_unitario:     precio,\n    costo_unitario:      it.unit_cost   || it.costo_unitario      || null,\n    descuento_pct:       descuento,\n    afecto_iva:          it.is_tax_affected !== undefined ? Boolean(it.is_tax_affected) : true,\n    total_neto:          totalNeto\n  }};\n});"
+      },
+      "id": "mapear-detalle",
+      "name": "Mapear Detalle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 300]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Agrega todas las líneas de este DTE en un único item.\n// Un solo item de salida garantiza que solo UN item vuelve al loop.\nconst lineas = $input.all().filter(i => !i.json._vacio).map(i => i.json);\nreturn [{ json: { __lineas: lineas } }];"
+      },
+      "id": "juntar-detalle",
+      "name": "Juntar Detalle",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2620, 300]
+    },
+
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL + '/rest/v1/ventas_detalle' }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" },
+            { "name": "Prefer",        "value": "resolution=merge-duplicates" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $input.all().filter(i => !i.json._sin_detalle).map(i => i.json) }}",
+        "jsonBody": "={{ $json.__lineas.length ? $json.__lineas : [] }}",
         "options": {}
       },
       "id": "upsert-detalle",
-      "name": "Upsert VentasDetalle Supabase",
+      "name": "Upsert Detalle Supabase",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1680, 300]
+      "position": [2840, 300]
     },
+
     {
       "parameters": {
-        "url": "={{ $env.SUPABASE_URL }}/rest/v1/sync_log",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL + '/rest/v1/sync_log' }}",
+        "authentication": "none",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             { "name": "apikey",        "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}" },
-            { "name": "Prefer",        "value": "resolution=merge-duplicates" },
-            { "name": "Content-Type",  "value": "application/json" }
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.SUPABASE_SERVICE_ROLE_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" },
+            { "name": "Prefer",        "value": "resolution=merge-duplicates" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "[{\"entidad\":\"dtes_diario\",\"ultimo_sync\":\"{{ $now.toISOString() }}\",\"estado\":\"ok\"}]",
+        "jsonBody": "={{ [{ entidad: 'dtes_diario', ultimo_sync: new Date().toISOString(), estado: 'ok' }] }}",
         "options": {}
       },
       "id": "update-sync-log",
       "name": "Update sync_log",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [1920, 300]
+      "position": [3060, 300]
     },
+
     {
       "parameters": {
         "conditions": {
-          "string": [
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
             {
-              "value1": "={{ $json.statusCode }}",
-              "operation": "notEqual",
-              "value2": "200"
+              "id": "error-check",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 400,
+              "operator": { "type": "number", "operation": "gte" }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       },
       "id": "check-error",
       "name": "¿Hubo error?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [2160, 300]
+      "typeVersion": 2,
+      "position": [3280, 300]
     },
+
     {
       "parameters": {
         "to": "dannidro@gmail.com",
-        "subject": "⚠️ Error en sync incremental Chillanejo — {{ $now.format('DD/MM/YYYY HH:mm') }}",
+        "subject": "=⚠️ Error sync Chillanejo — {{ new Date().toLocaleDateString('es-CL') }}",
         "emailType": "text",
-        "message": "El sync incremental diario de Chillanejo falló.\n\nRespuesta: {{ JSON.stringify($json) }}\n\nRevisar logs en n8n."
+        "message": "=El sync incremental falló.\n\nRespuesta: {{ JSON.stringify($json, null, 2) }}\n\nRevisar logs en n8n."
       },
       "id": "notify-error",
-      "name": "Notificar error por email",
+      "name": "Notificar error",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2,
-      "position": [2400, 200]
+      "position": [3500, 200]
     }
+
   ],
+
   "connections": {
     "Cron — cada hora": {
       "main": [[{ "node": "Set Fecha Chile", "type": "main", "index": 0 }]]
     },
     "Set Fecha Chile": {
-      "main": [[{ "node": "Fetch Ventas Relbase (paginado)", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Fetch Ventas Relbase", "type": "main", "index": 0 }]]
     },
-    "Fetch Ventas Relbase (paginado)": {
-      "main": [[{ "node": "Mapear Ventas + canal=presencial", "type": "main", "index": 0 }]]
+    "Fetch Ventas Relbase": {
+      "main": [[{ "node": "Mapear Ventas", "type": "main", "index": 0 }]]
     },
-    "Mapear Ventas + canal=presencial": {
+    "Mapear Ventas": {
+      "main": [[{ "node": "Juntar Ventas", "type": "main", "index": 0 }]]
+    },
+    "Juntar Ventas": {
       "main": [[{ "node": "Upsert Ventas Supabase", "type": "main", "index": 0 }]]
     },
     "Upsert Ventas Supabase": {
-      "main": [[{ "node": "Fetch + Mapear Detalle por DTE", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Fetch IDs Ventas Supabase", "type": "main", "index": 0 }]]
     },
-    "Fetch + Mapear Detalle por DTE": {
-      "main": [[{ "node": "Upsert VentasDetalle Supabase", "type": "main", "index": 0 }]]
+    "Fetch IDs Ventas Supabase": {
+      "main": [[{ "node": "Expandir Ventas", "type": "main", "index": 0 }]]
     },
-    "Upsert VentasDetalle Supabase": {
-      "main": [[{ "node": "Update sync_log", "type": "main", "index": 0 }]]
+    "Expandir Ventas": {
+      "main": [[{ "node": "Loop Detalle por DTE", "type": "main", "index": 0 }]]
+    },
+    "Loop Detalle por DTE": {
+      "main": [
+        [{ "node": "Fetch Detalle Relbase", "type": "main", "index": 0 }],
+        [{ "node": "Update sync_log",       "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Detalle Relbase": {
+      "main": [[{ "node": "Mapear Detalle", "type": "main", "index": 0 }]]
+    },
+    "Mapear Detalle": {
+      "main": [[{ "node": "Juntar Detalle", "type": "main", "index": 0 }]]
+    },
+    "Juntar Detalle": {
+      "main": [[{ "node": "Upsert Detalle Supabase", "type": "main", "index": 0 }]]
+    },
+    "Upsert Detalle Supabase": {
+      "main": [[{ "node": "Loop Detalle por DTE", "type": "main", "index": 0 }]]
     },
     "Update sync_log": {
       "main": [[{ "node": "¿Hubo error?", "type": "main", "index": 0 }]]
     },
     "¿Hubo error?": {
       "main": [
-        [{ "node": "Notificar error por email", "type": "main", "index": 0 }],
+        [{ "node": "Notificar error", "type": "main", "index": 0 }],
         []
       ]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
+
+  "settings": { "executionOrder": "v1" },
+
   "meta": {
-    "description": "Sync incremental nativo en n8n. Cada hora: trae DTEs del día desde Relbase con paginación, agrega canal=presencial, upsert ventas+detalle en Supabase.",
-    "version": "2.0.0"
+    "description": "v3: Sync incremental 100% nativo n8n. Sin fetch() en Code nodes. Sin credenciales predefinidas — auth via $env. Paginacion Relbase via HTTP Request built-in pagination. Loop SplitInBatches para detalle por DTE.",
+    "version": "3.0.0"
   }
 }
