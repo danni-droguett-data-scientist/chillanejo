@@ -3,9 +3,9 @@ import { RefreshCw, TrendingUp, DollarSign, Users, Server } from "lucide-react";
 import { useCeo } from "@/hooks/useCeo";
 import { TarjetaKpi } from "@/components/dashboard/TarjetaKpi";
 import { ChatClaude } from "@/components/ceo/ChatClaude";
-import { clp, pct, fechaCorta } from "@/lib/formato";
+import { clp } from "@/lib/formato";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, BarChart, Bar,
 } from "recharts";
 

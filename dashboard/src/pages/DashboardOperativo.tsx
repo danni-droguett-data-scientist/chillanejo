@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { RefreshCw, ShoppingCart, TrendingUp, Users, Package } from "lucide-react";
 import { useDashboard } from "@/hooks/useDashboard";
-import type { TopProducto } from "@/hooks/useDashboard";
+import type { TopProducto, Periodo } from "@/hooks/useDashboard";
 import { TarjetaKpi } from "@/components/dashboard/TarjetaKpi";
 import { GraficoVentas } from "@/components/dashboard/GraficoVentas";
 import { TablaTopProductos } from "@/components/dashboard/TablaTopProductos";
@@ -16,6 +16,32 @@ const TABS_CANAL: { key: CanalFiltro; label: string }[] = [
   { key: "presencial", label: "Presencial" },
   { key: "online",     label: "Online"     },
 ];
+
+const PERIODOS: { key: Periodo; label: string }[] = [
+  { key: "hoy",            label: "Hoy" },
+  { key: "ultimos_7_dias", label: "7 días" },
+  { key: "ultimos_30_dias", label: "30 días" },
+  { key: "mes_actual",     label: "Mes actual" },
+  { key: "mes_anterior",   label: "Mes anterior" },
+];
+
+// Formatea timestamp ISO 8601 a hora legible en zona Chile.
+function formatearSyncChile(timestamp: string | null): string {
+  if (!timestamp) return "—";
+  try {
+    const fecha = new Date(timestamp);
+    return fecha.toLocaleString("es-CL", {
+      timeZone: "America/Santiago",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return "—";
+  }
+}
 
 // Dado el filtro activo, remapea ingresos_netos y re-rankea el top 10
 function filtrarTop(datos: TopProducto[], canal: CanalFiltro): TopProducto[] {
@@ -38,6 +64,7 @@ function filtrarTop(datos: TopProducto[], canal: CanalFiltro): TopProducto[] {
 
 export default function DashboardOperativo() {
   const [canalFiltro, setCanalFiltro] = useState<CanalFiltro>("todos");
+  const [periodo, setPeriodo] = useState<Periodo>("mes_actual");
 
   const {
     kpis,
@@ -48,11 +75,12 @@ export default function DashboardOperativo() {
     stockCritico,
     resumenStock,
     ultimasVentas,
+    ultimaSyncRelbase,
     cargando,
     error,
     ultimaActualizacion,
     refetch,
-  } = useDashboard();
+  } = useDashboard(periodo);
 
   const varMes = variacion(
     kpis?.mes.ingresos_netos ?? 0,
@@ -64,25 +92,52 @@ export default function DashboardOperativo() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="border-b bg-white px-6 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900">Dashboard Operativo</h1>
-          <p className="text-xs text-gray-400 mt-0.5">El Chillanejo · Distribuidora</p>
+      <header className="border-b bg-white px-6 py-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900">Dashboard Operativo</h1>
+            <p className="text-xs text-gray-400 mt-0.5">El Chillanejo · Distribuidora</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {ultimaSyncRelbase && (
+              <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-1.5 text-xs">
+                <span className="text-gray-500">Última sync:</span>
+                <span className="font-medium text-gray-700 tabular-nums">
+                  {formatearSyncChile(ultimaSyncRelbase)}
+                </span>
+              </div>
+            )}
+            {ultimaActualizacion && (
+              <span className="text-xs text-gray-400 hidden sm:block">
+                Panel {ultimaActualizacion.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+            <button
+              onClick={refetch}
+              disabled={cargando}
+              className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${cargando ? "animate-spin" : ""}`} />
+              Actualizar
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          {ultimaActualizacion && (
-            <span className="text-xs text-gray-400 hidden sm:block">
-              Actualizado {ultimaActualizacion.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          )}
-          <button
-            onClick={refetch}
-            disabled={cargando}
-            className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${cargando ? "animate-spin" : ""}`} />
-            Actualizar
-          </button>
+
+        {/* Selector de período */}
+        <div className="flex gap-1.5">
+          {PERIODOS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setPeriodo(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                periodo === key
+                  ? "bg-gray-900 text-white"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </header>
 
@@ -191,7 +246,7 @@ export default function DashboardOperativo() {
         {/* Fila 2: Gráfico ventas 30 días */}
         <section className="rounded-xl border bg-white p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-gray-700 mb-4">
-            Ingresos netos — mes actual
+            Ingresos netos — {PERIODOS.find(p => p.key === periodo)?.label.toLowerCase()}
           </h2>
           <GraficoVentas datos={ventasPorDia} cargando={cargando} />
         </section>
@@ -202,7 +257,7 @@ export default function DashboardOperativo() {
             {/* Header con filtro canal */}
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-sm font-semibold text-gray-700">
-                Top 10 productos — mes actual
+                Top 10 productos — {PERIODOS.find(p => p.key === periodo)?.label.toLowerCase()}
               </h2>
               <div className="flex gap-1">
                 {TABS_CANAL.map(({ key, label }) => (

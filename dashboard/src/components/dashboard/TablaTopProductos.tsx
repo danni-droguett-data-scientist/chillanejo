@@ -32,7 +32,7 @@ export function TablaTopProductos({ datos, cargando = false }: Props) {
 
   if (!datos.length) {
     return (
-      <p className="py-8 text-center text-sm text-gray-400">Sin ventas este mes</p>
+      <p className="py-8 text-center text-sm text-gray-400">Sin ventas en el período</p>
     );
   }
 

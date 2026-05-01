@@ -15,6 +15,13 @@ interface Props {
   cargando?: boolean;
 }
 
+// Para períodos cortos mostramos todos los ticks; para rangos largos cada 5 días.
+function intervalEjeX(totalDias: number): number | "preserveStartEnd" {
+  if (totalDias <= 7) return 0;
+  if (totalDias <= 31) return 4;
+  return "preserveStartEnd";
+}
+
 function TooltipPersonalizado({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -36,10 +43,12 @@ export function GraficoVentas({ datos, cargando = false }: Props) {
   if (!datos.length) {
     return (
       <div className="flex h-64 items-center justify-center text-sm text-gray-400">
-        Sin datos para el período
+        Sin datos disponibles
       </div>
     );
   }
+
+  const xInterval = intervalEjeX(datos.length);
 
   return (
     <ResponsiveContainer width="100%" height={260}>
@@ -51,7 +60,7 @@ export function GraficoVentas({ datos, cargando = false }: Props) {
           tick={{ fontSize: 11, fill: "#9ca3af" }}
           tickLine={false}
           axisLine={false}
-          interval="preserveStartEnd"
+          interval={xInterval}
         />
         <YAxis
           tickFormatter={(v) => `$${(v / 1_000_000).toFixed(1)}M`}

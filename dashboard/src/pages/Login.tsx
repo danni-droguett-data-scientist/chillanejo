@@ -1,11 +1,18 @@
 import { useState } from "react";
+import { Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Login() {
+  const { session, cargando: authCargando } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(false);
+
+  if (authCargando) return null;
+  if (session) return <Navigate to="/operativo" replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -13,8 +20,12 @@ export default function Login() {
     setError(null);
 
     const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-    if (err) setError(err.message);
-    setCargando(false);
+    if (err) {
+      setError(err.message);
+      setCargando(false);
+    } else {
+      navigate("/operativo", { replace: true });
+    }
   };
 
   return (

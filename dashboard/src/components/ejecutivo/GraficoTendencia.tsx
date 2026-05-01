@@ -2,7 +2,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { clp, fechaCorta } from "@/lib/formato";
+import { clp } from "@/lib/formato";
 import type { MesVenta } from "@/hooks/useEjecutivo";
 
 interface Props {
