@@ -17,6 +17,13 @@ interface RangoFechas {
   hasta: string;
 }
 
+interface VentaRaw {
+  fecha_emision: string;
+  neto: number | null;
+  total: number | null;
+  canal?: string | null;
+}
+
 export interface KpiPeriodo {
   ingresos_netos: number;
   ingresos_brutos: number;
@@ -180,7 +187,7 @@ function rangoDeFechas(periodo: Periodo): RangoFechas {
   }
 }
 
-function calcKpi(rows: { neto: number; total: number }[]): KpiPeriodo {
+function calcKpi(rows: VentaRaw[]): KpiPeriodo {
   const ingresos_netos  = rows.reduce((s, r) => s + (r.neto  ?? 0), 0);
   const ingresos_brutos = rows.reduce((s, r) => s + (r.total ?? 0), 0);
   const num_ventas      = rows.length;
@@ -218,9 +225,9 @@ async function fetchVentasPaginado(
   desde: string,
   hasta: string,
   campos: string
-): Promise<any[]> {
+): Promise<VentaRaw[]> {
   const PAGE = 1000;
-  const all: any[] = [];
+  const all: VentaRaw[] = [];
   let offset = 0;
   while (true) {
     const { data, error } = await supabase
