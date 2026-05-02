@@ -13,11 +13,14 @@
 -- =============================================================================
 
 -- Helper: extrae app_role del JWT
+-- Supabase almacena user_metadata bajo la clave 'user_metadata' en el JWT.
+-- Intentamos ambos paths: user_metadata.app_role y top-level app_role (custom claims hook).
 create or replace function auth.rol_app()
 returns text
 language sql stable
 as $$
     select coalesce(
+        current_setting('request.jwt.claims', true)::json->'user_metadata'->>'app_role',
         current_setting('request.jwt.claims', true)::json->>'app_role',
         'anon'
     );

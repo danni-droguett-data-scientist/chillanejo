@@ -11,6 +11,7 @@ Reglas de código aplicadas:
 - Logging útil en cada paso
 """
 
+import argparse
 import os
 import time
 import logging
@@ -198,9 +199,25 @@ def actualizar_sync_log(fecha: str, total: int) -> None:
             f"Error actualizando sync_log: {response.status_code} — {response.text}")
 
 
+def parsear_fecha(valor: str) -> str:
+    """Convierte DD-MM-YYYY a YYYY-MM-DD; lanza ValueError si el formato es incorrecto."""
+    try:
+        return datetime.strptime(valor, "%d-%m-%Y").strftime("%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"Formato de fecha inválido: '{valor}'. Use DD-MM-YYYY.")
+
+
 def main():
     """Punto de entrada principal del sync incremental."""
-    fecha = fecha_hoy_chile()
+    parser = argparse.ArgumentParser(description="Sync incremental de ventas Relbase → Supabase.")
+    parser.add_argument(
+        "--fecha",
+        metavar="DD-MM-YYYY",
+        help="Fecha a sincronizar (por defecto: hoy en zona America/Santiago).",
+    )
+    args = parser.parse_args()
+
+    fecha = parsear_fecha(args.fecha) if args.fecha else fecha_hoy_chile()
     log.info(f"=== Sync incremental iniciado — {fecha} ===")
 
     try:

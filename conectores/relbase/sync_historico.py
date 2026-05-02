@@ -115,14 +115,17 @@ def _ahora_iso() -> str:
 
 def _etapa_completa(supabase, etapa: str) -> bool:
     """Consulta sync_log para saber si una etapa del histórico ya fue cargada."""
-    resp = (
-        supabase.table("sync_log")
-        .select("ultima_sync")
-        .eq("entidad", f"historico_{etapa}")
-        .maybe_single()
-        .execute()
-    )
-    return bool(resp.data)
+    try:
+        resp = (
+            supabase.table("sync_log")
+            .select("ultima_sync")
+            .eq("entidad", f"historico_{etapa}")
+            .limit(1)
+            .execute()
+        )
+        return bool(resp.data)
+    except Exception:
+        return False
 
 
 def _marcar_etapa(supabase, etapa: str, metricas: dict) -> None:

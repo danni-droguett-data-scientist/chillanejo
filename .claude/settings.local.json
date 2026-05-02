@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version)",
+      "Bash(pip3 --version)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(pip install *)",
+      "Bash(python *)",
+      "Bash(PYTHONPATH=/c/Users/danni/chillanejo python *)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONPATH=. python *)",
+      "Bash(supabase --version)",
+      "Bash(pkill -f sync_historico.py)",
+      "Bash(taskkill /F /FI \"WINDOWTITLE eq sync_historico*\")",
+      "Bash(tasklist)",
+      "PowerShell(Stop-Process *)",
+      "Bash(PYTHONPATH=. python *)",
+      "Bash(tasklist /fi \"imagename eq python.exe\" /fo csv)",
+      "PowerShell(Get-WmiObject *)",
+      "Bash(PYTHONIOENCODING=utf-8 PYTHONPATH=. RELBASE_RATE_MAX=5 RELBASE_MAX_WORKERS=5 python conectores/relbase/sync_historico.py --continuar --solo ventas_detalle stock)",
+      "Bash(echo \"PID: $!\")",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"Lote|=== Fin|ventas_procesadas|ERROR|Traceback|Exception\" } | Select-Object -Last 30)",
+      "Bash(python3 *)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"Lote|=== Fin|ventas_procesadas|stock|ERROR|Traceback\" } | Select-Object -Last 15)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"Lote \\\\d+/247|=== Fin|stock\" } | Select-Object -Last 5)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"Lote \\\\d+/247|=== Fin|stock\" } | Select-Object -Last 3)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"Lote \\\\d+/247|=== Fin|stock|Stock|sync_log\" } | Select-Object -Last 5)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"productos map|productos_map|Productos map|\\\\d+ productos\" } | Select-Object -First 5)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"Lote \\\\d+/247|=== Fin|=== Inicio|stock|Stock|sync_log|ventas_procesadas\" } | Select-Object -Last 8)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\danni\\\\chillanejo\\\\sync_detalle_clean.log\" -Encoding UTF8 | Where-Object { $_ -match \"Lote \\\\d+/247|=== Fin|Stock:|stock|lineas_cargadas|ventas_procesadas|errores|duracion\" } | Select-Object -Last 10)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001)",
+      "Bash(curl -s -X POST 'https://yivanwfghoynvtgcjdmx.supabase.co/auth/v1/token?grant_type=password' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpdmFud2ZnaG95bnZ0Z2NqZG14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5OTM1NjksImV4cCI6MjA5MjU2OTU2OX0.52Sh3IZZj2Mh9yTvUqf39WoipTmI-YPaRDIO8BH2g6I' -H 'Content-Type: application/json' -d '{\"email\":\"dannidro@gmail.com\",\"password\":\"test\"}')",
+      "Bash(cat \"C:\\\\\\\\Users\\\\\\\\danni\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Users-danni-chillanejo\\\\\\\\b3b9bb83-21ec-4c91-affd-6a5ceef85b07\\\\\\\\tasks\\\\\\\\b0jmo6lv8.output\")"
+    ]
+  }
+}
