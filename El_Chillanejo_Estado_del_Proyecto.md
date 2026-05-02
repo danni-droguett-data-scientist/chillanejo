@@ -1,7 +1,7 @@
 # El Chillanejo — Estado del Proyecto
 
 > Documento de estado y seguimiento del proyecto.
-> Última actualización: 28/04/2026
+> Última actualización: 02/05/2026
 > Autor: Daniel Droguett R.
 
 ---
@@ -18,7 +18,7 @@ Plataforma de data science y canal digital para El Chillanejo, distribuidora de 
 
 ## FASE 1 — DATA SCIENCE Y DASHBOARD OPERATIVO
 
-### Estado general: COMPLETO (base) / EN CURSO (automatización)
+### Estado general: COMPLETO (base + automatización + dashboard)
 
 ---
 
@@ -114,9 +114,17 @@ chillanejo/
 - **Función:** carga histórica completa de ventas, detalle, productos y stock desde Relbase
 - **Resultado:** 126.916 ventas + 307.895 líneas + 1.095 productos cargados
 
-#### Workflow 2: sync_incremental_diario (sync diario delta)
-- **Estado:** 🔶 En construcción — pendiente completar
-- **Función:** sincronización incremental horaria de ventas nuevas y cambios de stock
+#### Servicio Python sync_ventas (Railway — segundo servicio)
+- **Estado:** ✅ Funcionando en Railway
+- **Función:** sincronización incremental horaria de ventas desde Relbase a Supabase con paginación completa
+- **Resultado:** 311+ ventas/día sincronizadas
+- **Frecuencia:** cada hora
+- **Solución adoptada:** script Python en Railway como segundo servicio, evitando el bloqueo `N8N_BLOCK_ENV_ACCESS_IN_NODE` de n8n
+
+#### Workflow 2: sync_incremental_diario (sync incremental ventas_detalle)
+- **Estado:** ✅ Funcionando en Railway
+- **Función:** sincronización incremental horaria de ventas_detalle + update sync_log
+- **Frecuencia:** cada hora
 - **Nodos implementados (16 total):**
 
 | # | Nodo | Tipo | Estado |
@@ -124,29 +132,25 @@ chillanejo/
 | 1 | Cron — cada hora | scheduleTrigger | ✅ |
 | 2 | Set Fecha Chile | code | ✅ |
 | 3 | Fetch Ventas Relbase | httpRequest | ✅ |
-| 4 | Mapear Ventas | code | 🔶 Bloqueado por N8N_BLOCK_ENV_ACCESS_IN_NODE |
-| 5 | Juntar Ventas | code | ⬜ |
-| 6 | Upsert Ventas Supabase | httpRequest | ⬜ |
-| 7 | Fetch IDs Ventas Supabase | httpRequest | ⬜ |
-| 8 | Expandir Ventas | code | ⬜ |
-| 9 | Loop Detalle por DTE | splitInBatches | ⬜ |
-| 10 | Fetch Detalle Relbase | httpRequest | ⬜ |
-| 11 | Mapear Detalle | code | ⬜ |
-| 12 | Juntar Detalle | code | ⬜ |
-| 13 | Upsert Detalle Supabase | httpRequest | ⬜ |
-| 14 | Update sync_log | httpRequest | ⬜ |
-| 15 | ¿Hubo error? | if | ⬜ |
-| 16 | Notificar error | emailSend | ⬜ |
-
-**Problema activo:** La variable de entorno `N8N_BLOCK_ENV_ACCESS_IN_NODE=true` en Railway bloquea el acceso a `process.env` dentro de nodos Code de n8n. Pendiente resolución: usar credenciales n8n nativas o desactivar `N8N_BLOCK_ENV_ACCESS_IN_NODE` en el entorno Railway.
-
-**Próximo paso:** Resolver bloqueo de variables de entorno y completar nodos 5 en adelante.
+| 4 | Mapear Ventas | code | ✅ |
+| 5 | Juntar Ventas | code | ✅ |
+| 6 | Upsert Ventas Supabase | httpRequest | ✅ |
+| 7 | Fetch IDs Ventas Supabase | httpRequest | ✅ |
+| 8 | Expandir Ventas | code | ✅ |
+| 9 | Loop Detalle por DTE | splitInBatches | ✅ |
+| 10 | Fetch Detalle Relbase | httpRequest | ✅ |
+| 11 | Mapear Detalle | code | ✅ |
+| 12 | Juntar Detalle | code | ✅ |
+| 13 | Upsert Detalle Supabase | httpRequest | ✅ |
+| 14 | Update sync_log | httpRequest | ✅ (PATCH + on_conflict) |
+| 15 | ¿Hubo error? | if | ✅ |
+| 16 | Notificar error | emailSend | ✅ |
 
 ---
 
 ### 5. Dashboard Operativo v1
 
-- **Estado:** ✅ Funcionando en localhost:3002
+- **Estado:** ✅ Desplegado en [chillanejo.vercel.app](https://chillanejo.vercel.app)
 - **Stack:** React + Vite + Tailwind CSS + shadcn/ui + recharts
 - **Usuarios objetivo:** Marcelo, Ramón, Mirella
 - **Componentes construidos:**
@@ -158,7 +162,8 @@ chillanejo/
   - `ChatClaude.tsx` — chat CEO con Claude API
   - `AuthContext.tsx` + `RutaProtegida.tsx` — autenticación
 - **Hooks:** `useEjecutivo.ts`, `useCeo.ts`
-- **Pendiente:** subir a Vercel + configurar usuarios socios en Supabase Auth
+- **Funcionalidades activas:** selector de período, auto-refresh cada 60 min, indicador de última sync
+- **Pendiente:** configurar usuarios socios en Supabase Auth (P4)
 
 ---
 
@@ -224,52 +229,44 @@ Los tres documentos de diseño técnico están completos y en el repositorio:
 
 ## PENDIENTES INMEDIATOS (próxima sesión)
 
-### P1 — CRÍTICO: Resolver n8n sync_incremental_diario
+### P1 — ✅ CERRADO: Sync incremental funcionando
 
-**Problema:** `N8N_BLOCK_ENV_ACCESS_IN_NODE=true` en Railway bloquea `process.env` en nodos Code.
+**Solución implementada:** Python script en Railway (segundo servicio) sincroniza ventas con paginación completa (311+ ventas/día). n8n sincroniza ventas_detalle. Ambos corren cada hora.
 
-**Opciones a evaluar:**
-1. Desactivar `N8N_BLOCK_ENV_ACCESS_IN_NODE` en variables de entorno de Railway.
-2. Pasar credenciales como parámetros desde el nodo Schedule Trigger vía expression variables de n8n (sin tocar `process.env`).
-3. Usar credenciales nativas n8n (Header Auth) en los nodos httpRequest en vez de variables de entorno.
-
-**Próximo paso:** completar desde nodo 5 (Juntar Ventas) hasta nodo 16 (Notificar error).
+**Resolución:** se migró la sincronización de ventas a un script Python en Railway, evitando el bloqueo `N8N_BLOCK_ENV_ACCESS_IN_NODE`. n8n maneja ventas_detalle con todos sus nodos operativos.
 
 ---
 
-### P2 — Habilitar RLS en Supabase
+### P2 — ✅ CERRADO: Update sync_log
 
-- **Bloqueante:** YubiKey en camino (estimado ~5 junio 2026)
-- Políticas RLS ya definidas en migración 003
-- **Acción pendiente:** cuando llegue YubiKey, configurar 2FA en Supabase y habilitar RLS tabla por tabla
-- **Riesgo actual:** operar sin RLS — mitigado usando service_role key solo en backend/n8n
+**Solución implementada:** update del sync_log funcionando en n8n con PATCH + on_conflict.
 
 ---
 
-### P3 — Subir Dashboard a Vercel
+### P3 — ✅ CERRADO: Dashboard desplegado en Vercel
 
-- Dashboard Operativo v1 funcionando en localhost:3002
-- **Acción pendiente:**
-  1. Configurar `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en variables de entorno Vercel
-  2. Deploy desde rama `main` del repositorio
-  3. Configurar dominio (ej. `dashboard.chillanejo.cl` vía Cloudflare)
+**Estado:** Dashboard Operativo v1 desplegado en [chillanejo.vercel.app](https://chillanejo.vercel.app).
+
+**Funcionalidades activas:** selector de período, auto-refresh cada 60 min, indicador de última sync.
 
 ---
 
-### P4 — Configurar usuarios socios en Supabase Auth
+### P4 — 🔶 EN CURSO: Configurar usuarios socios en Supabase Auth
 
-**Usuarios a crear:**
+**Avance:** usuario CEO creado (dannidro@gmail.com).
+
+**Pendiente:**
 - Marcelo — acceso Dashboard Operativo + Ejecutivo
 - Ramón — acceso Dashboard Operativo + Ejecutivo
 - Mirella — acceso Dashboard Operativo + (futuro) Panel Mirella
 
-**Acción pendiente:** crear usuarios en Supabase Auth > Users, asignar rol en JWT claims o tabla de perfiles.
+**Acción pendiente:** crear usuarios Marcelo, Ramón y Mirella en Supabase Auth > Users, asignar rol en JWT claims o tabla de perfiles.
 
 ---
 
-### P5 — Iniciar implementación Fase 2
+### P5 — ⬜ PENDIENTE: Iniciar implementación Fase 2
 
-Una vez P1 resuelto, siguiente prioridad:
+Una vez P4 resuelto, siguiente prioridad:
 1. Migración schema Supabase fase 2 (008_fase2_schema.sql)
 2. OAuth MP: setup app marketplace, flujo autorización El Chillanejo
 3. Next.js: migrar plataforma/ de Vite a App Router
@@ -284,12 +281,13 @@ Una vez P1 resuelto, siguiente prioridad:
 | Base analítica | Supabase (PostgreSQL + Edge Functions + Auth) |
 | Automatización | n8n (self-hosted en Railway) |
 | Análisis | Python (pandas, numpy, scikit-learn, prophet) |
+| Sync incremental ventas | Python script (Railway, segundo servicio) |
 | Frontend dashboards | React + Vite + Tailwind + shadcn/ui + recharts |
 | Frontend tienda | Next.js 14 App Router + Tailwind + shadcn/ui + Zustand |
 | Pagos | Mercado Pago Checkout Pro + OAuth marketplace (split 92/8) |
 | Comunicación | Twilio (WhatsApp) + Resend (email transaccional) |
 | IA conversacional | Claude API (bots + Dashboard CEO) |
-| Deploy | Vercel (frontend) + Railway (n8n) |
+| Deploy | Vercel (frontend — chillanejo.vercel.app) + Railway (n8n + Python sync) |
 | DNS / Seguridad | Cloudflare |
 | Control de versiones | GitHub |
 | 2FA hardware | YubiKey (en camino, ~5 jun 2026) |
