@@ -161,7 +161,7 @@ MP permite marketplaces donde el vendedor (El Chillanejo) autoriza al marketplac
 1. Crear app en MP Developers como "marketplace".
 2. El Chillanejo autoriza via OAuth: `GET https://auth.mercadopago.cl/authorization?client_id=...&response_type=code&platform_id=mp&redirect_uri=...`
 3. Intercambiar `code` por `access_token` + `refresh_token` de la cuenta de El Chillanejo. Guardar en Supabase (tabla `mp_credentials`), cifrado.
-4. En cada preferencia, usar `access_token` del Chillanejo con el parámetro `marketplace_fee` calculado como `total_bruto * 0.08`.
+4. En cada preferencia, usar `access_token` del Chillanejo con el parámetro `marketplace_fee` calculado como `total_neto * 0.08`.
 
 **Parámetro en la preferencia:**
 ```json
@@ -229,7 +229,7 @@ export default async (req: Request) => {
     items: mpItems,
     payer: { name: comprador.nombre, email: comprador.email },
     marketplace: MP_APP_ID,
-    marketplace_fee: Math.round(total_bruto * 0.08),
+    marketplace_fee: Math.round(total_neto * 0.08),
     external_reference: pedido.id,
     back_urls: {
       success: `${BASE_URL}/pedido/confirmado`,
