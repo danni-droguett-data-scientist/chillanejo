@@ -212,6 +212,57 @@ Los tres documentos de diseño técnico están completos y en el repositorio:
 
 ---
 
+## FASE 3 — GROWTH Y PAID MEDIA
+
+### Estado general: PENDIENTE — iniciar después de Fase 2 estabilizada
+
+---
+
+### Objetivo
+
+Escalar ventas mensuales de $60M a $100M+ CLP mediante canales de paid media geolocalizados en Chillán y radio 50km.
+
+### Prerequisitos
+
+- Fase 2 operativa (tienda online funcionando, bots activos)
+- 2-3 meses de datos reales de ventas online para optimizar audiencias y creatividades
+
+### Componentes
+
+#### Meta Ads (Facebook / Instagram)
+- Segmentación geográfica: Chillán y radio 50km
+- Audiencias: dueños de negocios, administradores de restaurantes, ferias, almacenes
+- Formatos: catálogo dinámico de productos, ofertas semanales, remarketing carrito abandonado
+- Pixel Meta integrado en tienda Next.js para tracking de conversiones
+
+#### Google Ads
+- Búsqueda local: "distribuidor aseo Chillán", "abarrotes por mayor Chillán", términos de intención de compra
+- Shopping: catálogo de productos con precios actualizados desde Supabase
+- Display remarketing para visitas sin conversión
+
+#### Presupuesto inicial sugerido
+
+| Canal | CLP/mes |
+|---|---|
+| Meta Ads | $200.000 – $300.000 |
+| Google Ads | $100.000 – $200.000 |
+| **Total** | **$300.000 – $500.000** |
+
+#### ROI proyectado
+
+Con ticket promedio de $15.000-$25.000 CLP y tasa de conversión estimada 2-3%:
+- Inversión $300.000 → ~$6M-$11M en ventas adicionales (20x-37x)
+- A medida que se optimizan audiencias, el ROAS mejora progresivamente
+
+### Modelo comisión CEO — Fase 3
+
+Por definir con socios Marcelo y Ramón. Opciones a evaluar:
+- Comisión sobre incremento de ventas atribuido a paid media
+- Fee fijo mensual por gestión de campañas
+- Combinación de ambos
+
+---
+
 ## DECISIONES TOMADAS — SESIÓN 27-28/04/2026
 
 | Decisión | Detalle |
