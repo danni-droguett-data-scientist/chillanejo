@@ -33,7 +33,8 @@
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001)",
       "Bash(curl -s -X POST 'https://yivanwfghoynvtgcjdmx.supabase.co/auth/v1/token?grant_type=password' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpdmFud2ZnaG95bnZ0Z2NqZG14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5OTM1NjksImV4cCI6MjA5MjU2OTU2OX0.52Sh3IZZj2Mh9yTvUqf39WoipTmI-YPaRDIO8BH2g6I' -H 'Content-Type: application/json' -d '{\"email\":\"dannidro@gmail.com\",\"password\":\"test\"}')",
-      "Bash(cat \"C:\\\\\\\\Users\\\\\\\\danni\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Users-danni-chillanejo\\\\\\\\b3b9bb83-21ec-4c91-affd-6a5ceef85b07\\\\\\\\tasks\\\\\\\\b0jmo6lv8.output\")"
+      "Bash(cat \"C:\\\\\\\\Users\\\\\\\\danni\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Users-danni-chillanejo\\\\\\\\b3b9bb83-21ec-4c91-affd-6a5ceef85b07\\\\\\\\tasks\\\\\\\\b0jmo6lv8.output\")",
+      "Bash(Remove-Item \"c:\\\\Users\\\\danni\\\\chillanejo\\\\plataforma\\\\next.config.ts\")"
     ]
   }
 }
