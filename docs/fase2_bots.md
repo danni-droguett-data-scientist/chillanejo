@@ -153,7 +153,7 @@ Nuevo pedido bot ({{canal}})
 Cliente: Juan Pérez / +56912345678
 Total: $4.641
 Código: 481392
-Ver panel: https://dashboard.chillanejo.cl/pedidos
+Ver panel: https://dashboard.elchillanejo.cl/pedidos
 ```
 
 ---

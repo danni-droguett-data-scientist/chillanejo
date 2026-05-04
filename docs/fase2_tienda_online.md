@@ -170,7 +170,7 @@ MP permite marketplaces donde el vendedor (El Chillanejo) autoriza al marketplac
   "marketplace": "{{MP_APP_ID_CEO}}",
   "marketplace_fee": 368,
   "back_urls": { "success": "...", "failure": "...", "pending": "..." },
-  "notification_url": "https://tienda.chillanejo.cl/api/webhook-mp"
+  "notification_url": "https://tienda.elchillanejo.cl/api/webhook-mp"
 }
 ```
 
@@ -316,7 +316,7 @@ Al aprobarse el pago, Resend envía un email con:
 - Dirección y horario del local
 - Instrucciones: presentar código en caja, sin necesidad de imprimir
 
-**QR a futuro**: el código numérico es la base. El QR será simplemente la URL `https://tienda.chillanejo.cl/retiro/{{codigo}}` que Mirella puede escanear desde el panel.
+**QR a futuro**: el código numérico es la base. El QR será simplemente la URL `https://tienda.elchillanejo.cl/retiro/{{codigo}}` que Mirella puede escanear desde el panel.
 
 ---
 
@@ -595,7 +595,7 @@ RELBASE_TOKEN_EMPRESA=...
 
 # Resend
 RESEND_API_KEY=...
-EMAIL_FROM=pedidos@chillanejo.cl
+EMAIL_FROM=pedidos@elchillanejo.cl
 
 # Twilio (notificaciones Mirella)
 TWILIO_ACCOUNT_SID=...

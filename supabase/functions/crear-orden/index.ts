@@ -12,7 +12,7 @@ const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
 });
 
 const CEO_STRIPE_ACCOUNT = Deno.env.get("STRIPE_CEO_ACCOUNT_ID") ?? "";
-const PLATAFORMA_URL     = Deno.env.get("PLATAFORMA_URL") ?? "https://chillanejo.cl";
+const PLATAFORMA_URL     = Deno.env.get("PLATAFORMA_URL") ?? "https://elchillanejo.cl";
 // Comisión CEO: 8% sobre ventas online
 const COMISION_CEO_PCT   = 0.08;
 
